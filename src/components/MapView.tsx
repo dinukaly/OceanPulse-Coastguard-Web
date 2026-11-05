@@ -42,6 +42,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
     return () => {
       map.remove();
+      markersRef.current.clear();
       mapInstanceRef.current = null;
     };
   }, []);
@@ -82,7 +83,8 @@ export const MapView: React.FC<MapViewProps> = ({
         rippleClass = 'bg-amber-500/30';
       }
 
-      const iconHtml = `
+      const iconContent = document.createElement('div');
+      iconContent.innerHTML = `
         <div class="relative flex items-center justify-center cursor-pointer group">
           ${isUrgent ? `<div class="absolute w-10 h-10 rounded-full ${rippleClass} pointer-events-none"></div>` : ''}
           <div class="relative z-10 flex items-center justify-center w-7 h-7 rounded-full shadow-lg border-2 ${
@@ -92,16 +94,16 @@ export const MapView: React.FC<MapViewProps> = ({
               ${isUrgent ? 'SOS' : isAck ? '⚡' : '✓'}
             </span>
           </div>
-          <div class="absolute -bottom-6 px-1.5 py-0.5 rounded bg-slate-900/90 text-[10px] font-mono text-slate-200 border border-slate-700 whitespace-nowrap shadow pointer-events-none group-hover:block ${
+          <div data-vessel-label class="absolute -bottom-6 px-1.5 py-0.5 rounded bg-slate-900/90 text-[10px] font-mono text-slate-200 border border-slate-700 whitespace-nowrap shadow pointer-events-none group-hover:block ${
             isSelected ? 'block' : 'hidden'
-          }">
-            ${alert.boatId || alert.fishermanName}
-          </div>
+          }"></div>
         </div>
       `;
+      const label = iconContent.querySelector('[data-vessel-label]');
+      if (label) label.textContent = alert.boatId || alert.fishermanName;
 
       const customIcon = L.divIcon({
-        html: iconHtml,
+        html: iconContent,
         className: 'custom-beacon-pin',
         iconSize: [28, 28],
         iconAnchor: [14, 14],
@@ -114,27 +116,28 @@ export const MapView: React.FC<MapViewProps> = ({
       } else {
         const marker = L.marker([alert.latitude, alert.longitude], { icon: customIcon }).addTo(map);
 
-        marker.on('click', () => {
-          onSelectAlert(alert);
-        });
-
         currentMarkers.set(alert.id, marker);
       }
+      currentMarkers.get(alert.id)?.off('click').on('click', () => onSelectAlert(alert));
     });
   }, [alerts, selectedAlert, onSelectAlert]);
 
-  // Center on selected alert
+  const selectedLatitude = selectedAlert?.latitude;
+  const selectedLongitude = selectedAlert?.longitude;
+  const selectedId = selectedAlert?.id;
+
+  // Center on a new selection or changed coordinates.
   useEffect(() => {
-    if (!mapInstanceRef.current || !selectedAlert) return;
-    if (Number.isFinite(selectedAlert.latitude) && Number.isFinite(selectedAlert.longitude)) {
-      mapInstanceRef.current.flyTo([selectedAlert.latitude, selectedAlert.longitude], 10, {
+    if (!mapInstanceRef.current || !selectedId || selectedLatitude === undefined || selectedLongitude === undefined) return;
+    if (Number.isFinite(selectedLatitude) && Number.isFinite(selectedLongitude)) {
+      mapInstanceRef.current.flyTo([selectedLatitude, selectedLongitude], 10, {
         duration: 1.2,
       });
     }
-  }, [selectedAlert]);
+  }, [selectedId, selectedLatitude, selectedLongitude]);
 
   return (
-    <div className="relative w-full h-full min-h-[400px] bg-marine-950 overflow-hidden">
+    <div className="relative isolate w-full h-full min-h-[400px] bg-marine-950 overflow-hidden">
       <div ref={mapContainerRef} className="w-full h-full" />
 
       {/* Map Legend Overlay */}
@@ -148,7 +151,7 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-warning-amber" />
-          <span className="text-slate-200">Rescue Underway (Dispatched)</span>
+          <span className="text-slate-200">Acknowledged by Coast Guard</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-radar-green" />

@@ -56,7 +56,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
         </div>
         <div>
           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-            Underway Dispatch
+            Acknowledged
           </div>
           <div className="text-xl font-bold font-mono text-warning-amber">
             {stats.acknowledgedCount}

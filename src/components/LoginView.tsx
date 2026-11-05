@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Lock, Mail, AlertCircle, Anchor } from 'lucide-react';
+import { Shield, Lock, Mail, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const LoginView: React.FC = () => {
@@ -24,11 +24,6 @@ export const LoginView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleDemoFill = () => {
-    setEmail('coastguard.hq@oceanpulse.gov');
-    setPassword('CoastGuardPass123!');
   };
 
   return (
@@ -109,20 +104,6 @@ export const LoginView: React.FC = () => {
           </button>
         </form>
 
-        {/* Demo Credentials Quick Fill */}
-        <div className="mt-6 pt-4 border-t border-marine-800/80 text-center">
-          <div className="text-[11px] text-slate-400 mb-2">
-            Evaluator / Demonstration Environment
-          </div>
-          <button
-            type="button"
-            onClick={handleDemoFill}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-marine-800 hover:bg-marine-700 text-blue-300 hover:text-white border border-marine-700 text-xs font-medium transition"
-          >
-            <Anchor className="w-3.5 h-3.5" />
-            <span>Use Demo Station Account</span>
-          </button>
-        </div>
       </div>
     </div>
   );

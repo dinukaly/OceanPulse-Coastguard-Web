@@ -42,7 +42,7 @@ function getStatusBadge(status: AlertStatus) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-warning-amber/20 text-warning-amber border border-warning-amber/40">
           <span className="w-1.5 h-1.5 rounded-full bg-warning-amber" />
-          DISPATCHED
+          ACKNOWLEDGED
         </span>
       );
     case 'RESOLVED':
@@ -132,7 +132,7 @@ export const AlertFeed: React.FC<AlertFeedProps> = ({
           {[
             { id: 'all', label: 'All' },
             { id: 'active', label: 'Active SOS' },
-            { id: 'acknowledged', label: 'Dispatched' },
+            { id: 'acknowledged', label: 'Acknowledged' },
             { id: 'resolved', label: 'Resolved' },
           ].map((tab) => (
             <button

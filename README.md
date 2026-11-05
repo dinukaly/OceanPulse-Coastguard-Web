@@ -6,10 +6,10 @@ Web-based command dashboard for the Sri Lanka Maritime Rescue Coordination Centr
 
 ## Capabilities
 
-* **Real-Time Surveillance Map:** Interactive OpenStreetMap marine radar showing distress beacon positions along coastal Sri Lanka with live pulsing pins (Active = Red, Dispatched = Amber, Resolved = Green).
+* **Real-Time Surveillance Map:** Interactive OpenStreetMap marine radar showing distress beacon positions along coastal Sri Lanka with live pulsing pins (Active = Red, Acknowledged = Amber, Resolved = Green).
 * **Urgent Distress Feed:** Chronological queue of distress calls with time elapsed and critical visual escalation for calls unacknowledged for $>5$ minutes.
 * **Direct Vessel Communication:** Instant one-click phone dialer (`tel:`) to reach vessel masters directly, plus VHF Channel 16 (156.8 MHz) Mayday radio checklist.
-* **Dispatch & Operations Management:** Single-click rescue dispatch ("Acknowledge & Dispatch Unit"), operational log notes input, and incident resolution.
+* **Dispatch & Operations Management:** Acknowledge distress, record a dispatch after a unit has been sent, add operational notes, and resolve incidents.
 * **Full Audit Trail:** Immutable chronological timeline of all events, notes, and responder actions per vessel.
 * **Audio Distress Siren:** Integrated multi-tone maritime emergency siren synthesizer with browser-compliant user activation.
 
@@ -31,7 +31,7 @@ npm run dev
 
 The web dashboard starts at `http://localhost:5173`.
 
-### Demo Station Sign-In
-Use the **"Use Demo Station Account"** button on the login screen, or enter:
-* **Email:** `coastguard.hq@oceanpulse.gov`
-* **Password:** `CoastGuardPass123!`
+### Station Sign-In
+Sign in with a provisioned Coast Guard account. For local development, configure
+station credentials in the backend's private `.env` using the backend
+`COASTGUARD_PHASE1.md` instructions.

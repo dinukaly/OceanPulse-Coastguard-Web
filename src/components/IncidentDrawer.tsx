@@ -37,7 +37,7 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
     setActionLoading(true);
     setErrorMessage('');
     try {
-      const note = noteInput.trim() || 'Distress beacon acknowledged. Coast Guard patrol vessel dispatched.';
+      const note = noteInput.trim() || undefined;
       await onUpdateStatus(alert.id, 'ACKNOWLEDGED', note);
       setNoteInput('');
     } catch (err: any) {
@@ -51,7 +51,7 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
     setActionLoading(true);
     setErrorMessage('');
     try {
-      const note = noteInput.trim() || 'Vessel crew safely rescued and escorted to port. Incident resolved.';
+      const note = noteInput.trim() || undefined;
       await onUpdateStatus(alert.id, 'RESOLVED', note);
       setNoteInput('');
     } catch (err: any) {
@@ -61,13 +61,12 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
     }
   };
 
-  const handleAddNote = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddNote = async (action: 'NOTE' | 'DISPATCH') => {
     if (!noteInput.trim()) return;
     setActionLoading(true);
     setErrorMessage('');
     try {
-      await onAddNote(alert.id, noteInput.trim(), 'NOTE');
+      await onAddNote(alert.id, noteInput.trim(), action);
       setNoteInput('');
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to add note');
@@ -198,7 +197,7 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
               className="w-full py-2.5 px-4 rounded-lg bg-warning-amber hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition disabled:opacity-50"
             >
               <Compass className="w-4 h-4" />
-              <span>Acknowledge & Dispatch Rescue</span>
+              <span>Acknowledge Distress</span>
             </button>
           )}
 
@@ -221,7 +220,7 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
           )}
 
           {/* Add Operational Note Form */}
-          <form onSubmit={handleAddNote} className="space-y-2 pt-2 border-t border-marine-800">
+          <form onSubmit={(event) => { event.preventDefault(); void handleAddNote('NOTE'); }} className="space-y-2 pt-2 border-t border-marine-800">
             <label className="text-[11px] font-medium text-slate-400 block">
               Operational Note / Dispatch Log:
             </label>
@@ -230,6 +229,7 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
                 type="text"
                 placeholder="e.g. Patrol Craft P-412 deployed on 145°..."
                 value={noteInput}
+                maxLength={1000}
                 onChange={(e) => setNoteInput(e.target.value)}
                 disabled={actionLoading}
                 className="flex-1 bg-marine-900 border border-marine-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -243,6 +243,16 @@ export const IncidentDrawer: React.FC<IncidentDrawerProps> = ({
                 <span>Log</span>
               </button>
             </div>
+            {!alert.isHandled && (
+              <button
+                type="button"
+                onClick={() => void handleAddNote('DISPATCH')}
+                disabled={actionLoading || !noteInput.trim()}
+                className="w-full py-2 rounded-lg border border-warning-amber/50 text-warning-amber text-xs font-semibold disabled:opacity-40"
+              >
+                Record Dispatch
+              </button>
+            )}
           </form>
         </div>
 

@@ -23,7 +23,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (storedUser && token) {
       try {
         const parsed = JSON.parse(storedUser);
-        setUser(parsed);
+        if (parsed?.role === 'coastguard') setUser(parsed);
+        else api.setToken(null);
       } catch (_) {
         api.setToken(null);
       }
@@ -33,7 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     const data = await api.login(email, password);
-    if (data.user.role !== 'coastguard' && data.user.role !== 'admin') {
+    if (data.user.role !== 'coastguard') {
       api.setToken(null);
       throw new Error('Access denied: Account role is not authorized for Coastal Guard Emergency Command');
     }

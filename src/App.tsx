@@ -7,139 +7,172 @@ import { AlertFeed } from './components/AlertFeed';
 import { MapView } from './components/MapView';
 import { IncidentDrawer } from './components/IncidentDrawer';
 import { SosAlert, ResponderStats, AlertStatus } from './types/sos';
-import { api } from './services/api';
+import { api, sosSocketUrl } from './services/api';
+
+const emptyStats: ResponderStats = {
+  activeCount: 0, acknowledgedCount: 0, resolvedTodayCount: 0, totalOpen: 0,
+};
+
+const newestFirst = (a: SosAlert, b: SosAlert) => b.id.localeCompare(a.id);
 
 export const App: React.FC = () => {
   const { isAuthenticated, loading: authLoading } = useAuth();
 
   const [alerts, setAlerts] = useState<SosAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<SosAlert | null>(null);
-  const [stats, setStats] = useState<ResponderStats>({
-    activeCount: 0,
-    acknowledgedCount: 0,
-    resolvedTodayCount: 0,
-    totalOpen: 0,
-  });
+  const [stats, setStats] = useState<ResponderStats>(emptyStats);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [sirenEnabled, setSirenEnabled] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const [audioError, setAudioError] = useState(false);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const sirenEnabledRef = useRef(false);
   const knownActiveIds = useRef<Set<string>>(new Set());
+  const snapshot = useRef<AbortController | null>(null);
+  const revision = useRef(0);
+  const selectedId = useRef<string | null>(null);
+  const selectAlert = useCallback((alert: SosAlert | null) => {
+    selectedId.current = alert?.id ?? null;
+    setSelectedAlert(alert);
+  }, []);
 
   // Web Audio Siren Generator
-  const playSiren = useCallback(() => {
-    if (!sirenEnabled) return;
+  const playSiren = useCallback((confirmation = false) => {
+    const ctx = audioCtxRef.current;
+    if (!sirenEnabledRef.current || !ctx || ctx.state !== 'running') return;
     try {
-      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
-
       const now = ctx.currentTime;
-      // High-low 2-tone maritime distress alarm
-      [
+      const tones = confirmation ? [{ freq: 659.25, start: 0, dur: 0.15 }] : [
         { freq: 880, start: 0, dur: 0.25 },
         { freq: 587.33, start: 0.25, dur: 0.25 },
         { freq: 880, start: 0.5, dur: 0.25 },
         { freq: 587.33, start: 0.75, dur: 0.25 },
-      ].forEach(({ freq, start, dur }) => {
+      ];
+      tones.forEach(({ freq, start, dur }) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = 'sawtooth';
+        osc.type = confirmation ? 'sine' : 'sawtooth';
         osc.frequency.setValueAtTime(freq, now + start);
-        gain.gain.setValueAtTime(0.18, now + start);
+        gain.gain.setValueAtTime(confirmation ? 0.1 : 0.18, now + start);
         gain.gain.exponentialRampToValueAtTime(0.01, now + start + dur);
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(now + start);
         osc.stop(now + start + dur);
       });
-    } catch (_) {}
-  }, [sirenEnabled]);
+    } catch (_) { setAudioError(true); }
+  }, []);
 
-  const toggleSiren = () => {
-    if (!sirenEnabled) {
-      try {
-        const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioCtxRef.current = ctx;
-        if (ctx.state === 'suspended') ctx.resume();
-
-        // Brief chime to unlock audio context and confirm activation
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.setValueAtTime(659.25, now);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.15);
-
-        setSirenEnabled(true);
-      } catch (_) {
-        setSirenEnabled(true);
-      }
-    } else {
+  const toggleSiren = async () => {
+    setAudioError(false);
+    if (sirenEnabledRef.current) {
+      sirenEnabledRef.current = false;
       setSirenEnabled(false);
+      return;
+    }
+    const token = api.getToken();
+    try {
+      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      await ctx.resume();
+      if (!token || token !== api.getToken()) return;
+      if (ctx.state !== 'running') throw new Error('Audio could not start');
+      sirenEnabledRef.current = true;
+      setSirenEnabled(true);
+      playSiren(true);
+    } catch (_) {
+      if (token === api.getToken()) setAudioError(true);
     }
   };
 
-  // Fetch Data Function (used on mount & 5s polling safety net)
-  const fetchData = useCallback(async () => {
-    if (!isAuthenticated) return;
-    try {
-      const [alertsRes, statsRes] = await Promise.all([
-        api.getAlerts('all', 50),
-        api.getStats(),
-      ]);
-
-      const items = alertsRes.items || [];
-      setAlerts(items);
-      setStats(statsRes);
-
-      // Check for newly arrived ACTIVE alerts to trigger siren
-      let hasNewActive = false;
-      const currentActiveIds = new Set<string>();
-
-      items.forEach((a) => {
-        if (a.status === 'ACTIVE') {
-          currentActiveIds.add(a.id);
-          if (!knownActiveIds.current.has(a.id)) {
-            hasNewActive = true;
-          }
-        }
-      });
-
-      if (hasNewActive && knownActiveIds.current.size > 0) {
-        playSiren();
-      }
-      knownActiveIds.current = currentActiveIds;
-
-      // Update selected alert if open
-      if (selectedAlert) {
-        const updated = items.find((a) => a.id === selectedAlert.id);
-        if (updated) setSelectedAlert(updated);
-      }
-    } catch (_) {}
-  }, [isAuthenticated, selectedAlert, playSiren]);
-
-  // Initial load
-  useEffect(() => {
-    if (isAuthenticated) {
-      setLoading(true);
-      fetchData().finally(() => setLoading(false));
+  const announceNewActive = useCallback((items: SosAlert[]) => {
+    let hasNew = false;
+    for (const alert of items) {
+      if (alert.status !== 'ACTIVE' || knownActiveIds.current.has(alert.id)) continue;
+      knownActiveIds.current.add(alert.id);
+      hasNew = true;
     }
-  }, [isAuthenticated]);
+    if (hasNew) playSiren();
+  }, [playSiren]);
 
-  // 5-second polling interval (fail-safe safety net)
+  const applyAlert = useCallback((alert: SosAlert) => {
+    revision.current++;
+    setAlerts((previous) => {
+      const existing = previous.find((item) => item.id === alert.id);
+      if (existing && existing.notes.length > alert.notes.length) return previous;
+      return [alert, ...previous.filter((item) => item.id !== alert.id)].sort(newestFirst);
+    });
+    setSelectedAlert((previous) => previous?.id === alert.id && previous.notes.length <= alert.notes.length
+      ? { ...previous, ...alert } : previous);
+  }, []);
+
+  const fetchData = useCallback(async (showLoading = false) => {
+    const token = api.getToken();
+    if (!token || snapshot.current) return;
+    const controller = new AbortController();
+    snapshot.current = controller;
+    const requestedAt = revision.current;
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    if (showLoading) setLoading(true);
+    try {
+      const { signal } = controller;
+      const [recent, open, newStats] = await Promise.all([
+        api.getAlerts('all', 50, undefined, signal),
+        api.getOpenAlerts(signal),
+        api.getStats(signal),
+      ]);
+      const byId = new Map(recent.items.filter((alert) => alert.isHandled).map((alert) => [alert.id, alert]));
+      for (const alert of open) byId.set(alert.id, alert);
+      const id = selectedId.current;
+      const selected = id ? byId.get(id) ?? await api.getAlertById(id, signal) : null;
+      if (snapshot.current !== controller || token !== api.getToken()) return;
+      // A socket event or mutation that arrived during the read is newer than this snapshot.
+      if (revision.current === requestedAt) {
+        const items = [...byId.values()].sort(newestFirst);
+        announceNewActive(open);
+        setAlerts(items);
+        setStats(newStats);
+        setSelectedAlert((previous) => {
+          if (!previous) return null;
+          return (selected?.id === previous.id ? selected : byId.get(previous.id)) ?? previous;
+        });
+      }
+      setRefreshError(false);
+    } catch (_) {
+      if (snapshot.current === controller && token === api.getToken()) setRefreshError(true);
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      if (snapshot.current === controller) {
+        snapshot.current = null;
+        if (showLoading) setLoading(false);
+      }
+    }
+  }, [announceNewActive]);
+
   useEffect(() => {
-    if (!isAuthenticated) return;
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated, fetchData]);
+    if (!isAuthenticated) {
+      knownActiveIds.current.clear();
+      sirenEnabledRef.current = false;
+      setSirenEnabled(false);
+      setAudioError(false);
+      setRefreshError(false);
+      setLoading(false);
+      setAlerts([]);
+      setStats(emptyStats);
+      selectAlert(null);
+      return;
+    }
+    void fetchData(true);
+    const interval = setInterval(() => { void fetchData(); }, 5000);
+    return () => {
+      clearInterval(interval);
+      snapshot.current?.abort();
+      snapshot.current = null;
+    };
+  }, [isAuthenticated, fetchData, selectAlert]);
 
   // Real-time WebSocket connection to backend
   useEffect(() => {
@@ -153,29 +186,22 @@ export const App: React.FC = () => {
 
     const connectWs = () => {
       if (isDisposed) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/v1/messages/socket`;
-
       try {
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(sosSocketUrl());
 
         ws.onopen = () => {
           ws?.send(JSON.stringify({ type: 'auth', token }));
         };
 
         ws.onmessage = (event) => {
+          if (isDisposed || token !== api.getToken()) return;
           try {
             const data = JSON.parse(event.data);
-            if (data.type === 'sos.created') {
-              playSiren();
-              setAlerts((prev) => [data.alert, ...prev.filter((a) => a.id !== data.alert.id)]);
-              void api.getStats().then(setStats);
-            } else if (data.type === 'sos.updated' || data.type === 'sos.cancelled') {
-              setAlerts((prev) =>
-                prev.map((a) => (a.id === data.alert.id ? { ...a, ...data.alert } : a))
-              );
-              setSelectedAlert((prev) => (prev?.id === data.alert.id ? { ...prev, ...data.alert } : prev));
-              void api.getStats().then(setStats);
+            if (data.type === 'ready') {
+              void fetchData();
+            } else if (['sos.created', 'sos.updated', 'sos.cancelled'].includes(data.type) && data.alert?.id) {
+              applyAlert(data.alert);
+              if (data.type === 'sos.created') announceNewActive([data.alert]);
             }
           } catch (_) {}
         };
@@ -203,19 +229,25 @@ export const App: React.FC = () => {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, [isAuthenticated, playSiren]);
+  }, [isAuthenticated, announceNewActive, applyAlert, fetchData]);
 
   // Action Handlers for Incident Drawer
   const handleUpdateStatus = async (alertId: string, status: AlertStatus, note?: string) => {
+    const token = api.getToken();
     const updated = await api.updateStatus(alertId, status, note);
-    setSelectedAlert(updated);
-    await fetchData();
+    if (token === api.getToken()) {
+      applyAlert(updated);
+      void fetchData();
+    }
   };
 
   const handleAddNote = async (alertId: string, message: string, action: 'NOTE' | 'DISPATCH' = 'NOTE') => {
+    const token = api.getToken();
     const updated = await api.addNote(alertId, message, action);
-    setSelectedAlert(updated);
-    await fetchData();
+    if (token === api.getToken()) {
+      applyAlert(updated);
+      void fetchData();
+    }
   };
 
   if (authLoading) {
@@ -239,6 +271,13 @@ export const App: React.FC = () => {
         activeAlertCount={stats.activeCount}
       />
 
+      {refreshError && <p role="alert" className="px-4 py-2 bg-red-950 text-red-200 text-sm">
+        Could not refresh incidents. The displayed information may be out of date.
+      </p>}
+      {audioError && <p role="alert" className="px-4 py-2 bg-amber-950 text-amber-200 text-sm">
+        The browser could not play the distress alarm. Try enabling audio again.
+      </p>}
+
       {/* 2. Operational Stats Bar */}
       <StatsBar
         stats={stats}
@@ -253,14 +292,11 @@ export const App: React.FC = () => {
           <AlertFeed
             alerts={alerts}
             selectedAlert={selectedAlert}
-            onSelectAlert={setSelectedAlert}
+            onSelectAlert={selectAlert}
             selectedFilter={selectedFilter}
             onSelectFilter={setSelectedFilter}
             loading={loading}
-            onRefresh={() => {
-              setLoading(true);
-              fetchData().finally(() => setLoading(false));
-            }}
+            onRefresh={() => { void fetchData(true); }}
           />
         </div>
 
@@ -269,15 +305,16 @@ export const App: React.FC = () => {
           <MapView
             alerts={alerts}
             selectedAlert={selectedAlert}
-            onSelectAlert={setSelectedAlert}
+            onSelectAlert={selectAlert}
           />
         </div>
 
         {/* Incident Detail Slide-Over Drawer */}
         {selectedAlert && (
           <IncidentDrawer
+            key={selectedAlert.id}
             alert={selectedAlert}
-            onClose={() => setSelectedAlert(null)}
+            onClose={() => selectAlert(null)}
             onUpdateStatus={handleUpdateStatus}
             onAddNote={handleAddNote}
           />

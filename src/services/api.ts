@@ -1,6 +1,12 @@
 import { SosAlert, ResponderStats, CoastGuardUser, AlertStatus, NoteAction } from '../types/sos';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
+export const sosSocketUrl = () => {
+  const url = new URL(`${BASE_URL}/api/v1/messages/socket`, window.location.origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.href;
+};
 
 class ApiService {
   private token: string | null = null;
@@ -66,10 +72,12 @@ class ApiService {
   async getAlerts(
     status: string = 'all',
     limit: number = 50,
-    before?: string
+    before?: string,
+    signal?: AbortSignal,
   ): Promise<{ items: SosAlert[]; hasMore: boolean; nextCursor: string | null }> {
     const params = new URLSearchParams();
-    if (status && status !== 'all') params.append('status', status);
+    if (status === 'open') params.append('isHandled', 'false');
+    else if (status && status !== 'all') params.append('status', status);
     if (limit) params.append('limit', String(limit));
     if (before) params.append('before', before);
 
@@ -78,7 +86,7 @@ class ApiService {
       success: boolean;
       data: SosAlert[];
       pagination?: { limit: number; hasMore: boolean; nextCursor: string | null };
-    }>(`/api/v1/sosAlerts/responder/alerts${query}`);
+    }>(`/api/v1/sosAlerts/responder/alerts${query}`, { signal });
 
     return {
       items: response.data || [],
@@ -87,11 +95,25 @@ class ApiService {
     };
   }
 
-  async getAlertById(alertId: string): Promise<SosAlert> {
+  async getOpenAlerts(signal: AbortSignal): Promise<SosAlert[]> {
+    const alerts: SosAlert[] = [];
+    let before: string | undefined;
+    do {
+      const page = await this.getAlerts('open', 50, before, signal);
+      alerts.push(...page.items);
+      if (!page.hasMore) return alerts;
+      if (!page.nextCursor || (before && page.nextCursor >= before)) throw new Error('Invalid open alert cursor');
+      before = page.nextCursor;
+    } while (!signal.aborted);
+    signal.throwIfAborted();
+    return alerts;
+  }
+
+  async getAlertById(alertId: string, signal?: AbortSignal): Promise<SosAlert> {
     const response = await this.request<{
       success: boolean;
       data: SosAlert;
-    }>(`/api/v1/sosAlerts/responder/alerts/${alertId}`);
+    }>(`/api/v1/sosAlerts/responder/alerts/${alertId}`, { signal });
 
     return response.data;
   }
@@ -120,11 +142,11 @@ class ApiService {
     return response.data;
   }
 
-  async getStats(): Promise<ResponderStats> {
+  async getStats(signal?: AbortSignal): Promise<ResponderStats> {
     const response = await this.request<{
       success: boolean;
       data: ResponderStats;
-    }>('/api/v1/sosAlerts/responder/stats');
+    }>('/api/v1/sosAlerts/responder/stats', { signal });
 
     return (
       response.data || {
